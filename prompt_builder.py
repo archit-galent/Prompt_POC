@@ -138,6 +138,35 @@ Key guidelines:
                 section += f"- `{entity}`\n"
             section += "\n"
         
+        # Show query expansion (Cursor-style debugging)
+        expanded_queries = context.get('expanded_queries', [])
+        if expanded_queries and len(expanded_queries) > 1:
+            section += "**Query Expansion:**\n"
+            section += f"Original: `{expanded_queries[0]}`\n"
+            for i, expanded in enumerate(expanded_queries[1:], 1):
+                section += f"Variant {i}: `{expanded}`\n"
+            section += "\n"
+        
+        # Show retrieval methods used
+        retrieval_methods = context.get('retrieval_methods', {})
+        if retrieval_methods:
+            method_counts = {}
+            for method in retrieval_methods.values():
+                method_counts[method] = method_counts.get(method, 0) + 1
+            
+            section += "**Search Methods Used:**\n"
+            for method, count in method_counts.items():
+                method_display = {
+                    'exact_match': 'Exact Function/Class Match',
+                    'keyword': 'Keyword Search',
+                    'semantic_0.30': 'Semantic Search (High)',
+                    'semantic_0.21': 'Semantic Search (Medium)', 
+                    'semantic_0.15': 'Semantic Search (Low)'
+                }.get(method, method.replace('_', ' ').title())
+                
+                section += f"- {method_display}: {count} chunks\n"
+            section += "\n"
+        
         # Add similarity scores if available
         similarity_scores = context.get('similarity_scores', {})
         if similarity_scores:

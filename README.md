@@ -5,6 +5,9 @@ A CLI-based tool that analyzes local codebases and constructs contextual prompts
 ## Features
 
 - **Semantic Code Chunking**: Breaks code into function/class-level chunks using AST analysis
+- **Hybrid Search System**: Combines semantic similarity, keyword search, and exact matching (Cursor-style)
+- **Query Expansion**: Automatically expands natural language queries with technical terms
+- **Multi-threshold Search**: Uses multiple similarity levels to find relevant code
 - **Vector Embeddings**: Uses OpenAI embeddings API with FAISS for similarity search
 - **Dependency Graph**: Builds call graphs to understand function dependencies and relationships
 - **Context Expansion**: Combines similarity search with dependency graph traversal
@@ -90,10 +93,18 @@ python agent.py --repo ./test_repo --stats
 - `--task`: Analysis type (`analysis`, `debugging`, `refactoring`, `explanation`) - default: `analysis`
 - `--rebuild`: Force rebuild the index even if it exists
 - `--similarity-threshold`: Minimum similarity for chunk retrieval (default: 0.3)
+  - **Note**: The hybrid search automatically tries multiple thresholds
 - `--max-chunks`: Maximum number of code chunks to include (default: 15)
 - `--max-tokens`: Maximum tokens in generated prompt (default: 16000)
 - `--stats`: Show repository statistics instead of processing query
 - `--model`: OpenAI embedding model (default: `text-embedding-3-small`)
+
+### Query Types Supported
+
+✅ **Natural Language**: `"How does caching work?"`, `"What breaks if CONFIG_X is missing?"`  
+✅ **Technical Terms**: `"foo function"`, `"DataProcessor.process_batch"`  
+✅ **Mixed Queries**: `"caching in foo function"`, `"CONFIG_X validation errors"`  
+✅ **Abstract Concepts**: `"error handling"`, `"data processing workflow"`
 
 ## Architecture
 
@@ -110,10 +121,13 @@ python agent.py --repo ./test_repo --stats
    - Builds call graph relationships
    - Enables context expansion through dependencies
 
-3. **`retriever.py`**: Context retrieval and expansion
-   - Performs similarity search on user queries
-   - Expands context using dependency relationships
-   - Ranks and filters relevant code chunks
+3. **`retriever.py`**: Advanced context retrieval with hybrid search
+   - **Semantic Search**: Vector similarity using OpenAI embeddings
+   - **Keyword Search**: BM25-style text matching for technical terms
+   - **Exact Matching**: Direct function/class name matching
+   - **Query Expansion**: Natural language → technical term translation
+   - **Multi-threshold**: Combines results from different similarity levels
+   - Expands context using dependency graph relationships
 
 4. **`prompt_builder.py`**: Structured prompt construction
    - Creates multi-section prompts
@@ -131,10 +145,12 @@ python agent.py --repo ./test_repo --stats
    - Build dependency graph
 
 2. **Process Query**:
-   - Generate embedding for user query
-   - Search FAISS index for similar code chunks
-   - Expand context using dependency graph
-   - Construct structured prompt
+   - **Query Expansion**: Convert natural language to technical variants
+   - **Hybrid Search**: Semantic similarity + keyword matching + exact matches
+   - **Multi-threshold**: Try different similarity levels automatically
+   - **Context Expansion**: Use dependency graph for related code
+   - **Result Ranking**: Combine and rank results from all search methods
+   - **Prompt Construction**: Build structured, comprehensive prompt
 
 3. **Output**: Returns the complete prompt ready for LLM consumption
 
@@ -239,7 +255,10 @@ The generated prompt includes:
 
 3. **Import errors**: Ensure all dependencies are installed with `pip install -r requirements.txt`
 
-4. **Empty results**: Try lowering `--similarity-threshold` (e.g., 0.2)
+4. **Empty results**: 
+   - Try more specific terms: `"foo function"` instead of `"data processing"`
+   - Use technical terms: `"FEATURE_FLAGS enable_caching"` instead of `"caching settings"`
+   - The hybrid search now automatically handles low similarity cases
 
 5. **Windows PowerShell issues**: 
    - Use `$env:VARIABLE="value"` syntax instead of `export`

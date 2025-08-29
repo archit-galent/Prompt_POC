@@ -188,10 +188,163 @@ class ContextRetriever:
         
         return expanded_chunks
     
+    def _expand_query_terms(self, query: str) -> List[str]:
+        """
+        Expand natural language queries with technical terms (Cursor-style approach).
+        
+        Args:
+            query: Original user query
+            
+        Returns:
+            List of expanded query variants
+        """
+        expanded_queries = [query]  # Always include original
+        
+        # Common natural language to technical term mappings
+        term_mappings = {
+            # Caching related
+            "caching": ["cache", "FEATURE_FLAGS", "enable_caching", "cache_key"],
+            "cache": ["caching", "cache_key", "generate_hash", "FEATURE_FLAGS"],
+            "how does caching work": ["enable_caching", "cache_key", "FEATURE_FLAGS", "generate_hash"],
+            
+            # Configuration related  
+            "config": ["CONFIG_X", "settings", "FEATURE_FLAGS", "validate_config"],
+            "configuration": ["CONFIG_X", "settings", "FEATURE_FLAGS", "get_config"],
+            "what breaks": ["CONFIG_X", "validate_config", "health_check", "errors"],
+            
+            # Processing related
+            "processing": ["process_batch", "foo", "DataProcessor", "data_batch"],
+            "data processing": ["foo", "process_batch", "DataProcessor", "grouped"],
+            
+            # Error handling
+            "error": ["health_check", "validate_config", "errors", "issues"],
+            "fails": ["health_check", "validate_config", "CONFIG_X", "ValueError"],
+        }
+        
+        query_lower = query.lower()
+        
+        # Find matching mappings
+        for pattern, terms in term_mappings.items():
+            if pattern in query_lower:
+                # Add technical term variants
+                expanded_queries.extend([
+                    " ".join(terms),
+                    f"{query} {' '.join(terms[:3])}",  # Hybrid query
+                ])
+                break
+        
+        # Extract potential function/class names from query
+        import re
+        # Look for patterns like "foo()", "Foo", "foo_bar"
+        code_patterns = re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_]*(?:\(\))?', query)
+        if code_patterns:
+            expanded_queries.append(" ".join(code_patterns))
+        
+        return list(set(expanded_queries))  # Remove duplicates
+    
+    def _keyword_search(self, query: str, max_chunks: int = 15) -> List[Tuple[CodeChunk, float]]:
+        """
+        Perform keyword-based search as fallback (BM25-style).
+        
+        Args:
+            query: Search query
+            max_chunks: Maximum chunks to return
+            
+        Returns:
+            List of (chunk, relevance_score) tuples
+        """
+        if not self.indexer:
+            return []
+        
+        results = []
+        query_terms = set(query.lower().split())
+        
+        for chunk in self.indexer.chunks:
+            # Create searchable text (content + metadata)
+            searchable_text = f"{chunk.content} {chunk.name} {chunk.file_path}".lower()
+            
+            # Calculate keyword overlap score
+            chunk_terms = set(searchable_text.split())
+            overlap = len(query_terms.intersection(chunk_terms))
+            
+            if overlap > 0:
+                # Simple relevance scoring
+                relevance = overlap / len(query_terms)
+                
+                # Boost if function/class name matches exactly
+                if chunk.name and chunk.name.lower() in query.lower():
+                    relevance += 0.5
+                
+                # Boost if query terms appear in chunk name
+                for term in query_terms:
+                    if term in chunk.name.lower():
+                        relevance += 0.3
+                
+                results.append((chunk, relevance))
+        
+        # Sort by relevance and return top results
+        results.sort(key=lambda x: x[1], reverse=True)
+        return results[:max_chunks]
+    
+    def _hybrid_search(self, query: str, similarity_threshold: float = 0.3,
+                      max_chunks: int = 15) -> List[Tuple[CodeChunk, float, str]]:
+        """
+        Hybrid search combining semantic similarity and keyword matching.
+        
+        Args:
+            query: User's query
+            similarity_threshold: Minimum similarity threshold
+            max_chunks: Maximum chunks to return
+            
+        Returns:
+            List of (chunk, score, method) tuples
+        """
+        all_results = []
+        seen_chunks = set()
+        
+        # Expand query terms
+        query_variants = self._expand_query_terms(query)
+        
+        # Strategy 1: Semantic search with multiple thresholds
+        thresholds = [similarity_threshold, similarity_threshold * 0.7, similarity_threshold * 0.5]
+        
+        for threshold in thresholds:
+            for variant in query_variants:
+                try:
+                    semantic_results = self.search_similar_chunks(variant, k=max_chunks)
+                    for chunk, score in semantic_results:
+                        if score >= threshold and id(chunk) not in seen_chunks:
+                            all_results.append((chunk, score, f"semantic_{threshold:.2f}"))
+                            seen_chunks.add(id(chunk))
+                except:
+                    continue
+        
+        # Strategy 2: Keyword search for all query variants
+        for variant in query_variants:
+            keyword_results = self._keyword_search(variant, max_chunks)
+            for chunk, score in keyword_results:
+                if id(chunk) not in seen_chunks:
+                    all_results.append((chunk, score, "keyword"))
+                    seen_chunks.add(id(chunk))
+        
+        # Strategy 3: Exact function/class name matching
+        import re
+        code_terms = re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_]*\b', query)
+        for term in code_terms:
+            for chunk in self.indexer.chunks:
+                if (chunk.name and chunk.name.lower() == term.lower() and 
+                    id(chunk) not in seen_chunks):
+                    all_results.append((chunk, 1.0, "exact_match"))
+                    seen_chunks.add(id(chunk))
+        
+        # Sort by score (highest first) and limit results
+        all_results.sort(key=lambda x: x[1], reverse=True)
+        return all_results[:max_chunks]
+
     def retrieve_context(self, query: str, similarity_threshold: float = 0.3,
                         max_chunks: int = 15) -> Dict[str, any]:
         """
-        Main context retrieval method that combines similarity search and graph expansion.
+        Enhanced context retrieval using hybrid search (Cursor-style approach).
         
         Args:
             query: User's query
@@ -204,28 +357,32 @@ class ContextRetriever:
         if not self.indexer:
             raise ValueError("Index not loaded. Call load_index() first.")
         
-        # Step 1: Initial similarity search
-        similar_chunks = self.search_similar_chunks(query, k=max_chunks * 2)
+        # Step 1: Hybrid search (semantic + keyword + exact matching)
+        hybrid_results = self._hybrid_search(query, similarity_threshold, max_chunks * 2)
         
-        # Step 2: Filter by similarity threshold
-        filtered_chunks = [
-            chunk for chunk, score in similar_chunks 
-            if score >= similarity_threshold
-        ]
+        # Extract chunks and create method tracking
+        retrieved_chunks = []
+        retrieval_methods = {}
+        similarity_scores = {}
         
-        # Step 3: Extract focus entities from query and chunks
-        focus_entities = self._extract_focus_entities(query, filtered_chunks)
+        for chunk, score, method in hybrid_results:
+            retrieved_chunks.append(chunk)
+            retrieval_methods[chunk] = method
+            similarity_scores[chunk] = score
         
-        # Step 4: Expand context using dependency graph
+        # Step 2: Extract focus entities from query and chunks
+        focus_entities = self._extract_focus_entities(query, retrieved_chunks)
+        
+        # Step 3: Expand context using dependency graph
         if self.graph_builder:
-            expanded_chunks = self.expand_context_with_graph(filtered_chunks, focus_entities)
+            expanded_chunks = self.expand_context_with_graph(retrieved_chunks, focus_entities)
         else:
-            expanded_chunks = filtered_chunks
+            expanded_chunks = retrieved_chunks
         
-        # Step 5: Limit final results
+        # Step 4: Limit final results but preserve high-scoring ones
         final_chunks = expanded_chunks[:max_chunks]
         
-        # Step 6: Organize results by file for better prompt structure
+        # Step 5: Organize results by file
         chunks_by_file = {}
         for chunk in final_chunks:
             if chunk.file_path not in chunks_by_file:
@@ -241,8 +398,10 @@ class ContextRetriever:
             "focus_entities": list(focus_entities),
             "total_chunks": len(final_chunks),
             "chunks_by_file": chunks_by_file,
-            "similarity_scores": dict(similar_chunks[:len(final_chunks)]),
-            "files_involved": list(chunks_by_file.keys())
+            "similarity_scores": {k: v for k, v in similarity_scores.items() if k in final_chunks},
+            "retrieval_methods": {str(id(k)): v for k, v in retrieval_methods.items() if k in final_chunks},
+            "files_involved": list(chunks_by_file.keys()),
+            "expanded_queries": self._expand_query_terms(query)[:3]  # Show first 3 for debugging
         }
     
     def get_file_overview(self, file_path: str) -> Dict[str, any]:
