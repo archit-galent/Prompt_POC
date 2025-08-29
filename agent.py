@@ -8,6 +8,7 @@ import argparse
 import sys
 from pathlib import Path
 from typing import Optional
+from dotenv import load_dotenv
 
 from indexer import CodeIndexer
 from graph import DependencyGraphBuilder
@@ -172,8 +173,7 @@ Examples:
     
     parser.add_argument(
         "--query",
-        required=True,
-        help="Your question about the code"
+        help="Your question about the code (required unless using --stats)"
     )
     
     parser.add_argument(
@@ -223,6 +223,13 @@ Examples:
     )
     
     args = parser.parse_args()
+    
+    # Validate arguments
+    if not args.stats and not args.query:
+        parser.error("--query is required unless using --stats")
+    
+    # Load .env file if it exists
+    load_dotenv()
     
     # Check for API key
     api_key = os.getenv("OPENAI_API_KEY")

@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Environment variables
+.env
+
+# FAISS index files
+*.index
+*.metadata
+
+# OS files
+.DS_Store
+Thumbs.db

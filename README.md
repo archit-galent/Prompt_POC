@@ -1,6 +1,6 @@
 # Prompt Engineering Agent POC
 
-A CLI-based tool that analyzes local codebases and constructs contextual prompts for LLM queries. This POC implements the full prompt engineering pipeline: codebase indexing, dependency graph mapping, context retrieval, and structured prompt construction.
+A CLI-based tool that analyzes local codebases and constructs contextual prompts for LLM queries. This POC implements a prompt engineering pipeline including: codebase indexing, dependency graph mapping, context retrieval, and structured prompt construction.
 
 ## Features
 
@@ -15,6 +15,10 @@ A CLI-based tool that analyzes local codebases and constructs contextual prompts
 - Python 3.8+
 - OpenAI API key
 - Required packages (see `requirements.txt`)
+  - `openai` - OpenAI API client
+  - `faiss-cpu` - Vector similarity search
+  - `numpy` - Numerical computations
+  - `python-dotenv` - .env file support
 
 ## Installation
 
@@ -30,8 +34,29 @@ pip install -r requirements.txt
 ```
 
 3. Set your OpenAI API key:
+
+**Option A: .env file (Recommended)**
+Create a `.env` file in the project root:
+```bash
+OPENAI_API_KEY=your-api-key-here
+```
+The agent will automatically load this file on startup.
+
+**Option B: Environment Variables**
+
+*Linux/macOS (Bash/Zsh):*
 ```bash
 export OPENAI_API_KEY='your-api-key-here'
+```
+
+*Windows (PowerShell):*
+```powershell
+$env:OPENAI_API_KEY="your-api-key-here"
+```
+
+*Windows (Command Prompt):*
+```cmd
+set OPENAI_API_KEY=your-api-key-here
 ```
 
 ## Usage
@@ -115,7 +140,9 @@ python agent.py --repo ./test_repo --stats
 
 ## Example: Testing with the Toy Repository
 
-The project includes a `test_repo/` with sample code to demonstrate the agent:
+The project includes a `test_repo/` with sample code to demonstrate the agent.
+
+**First, ensure your API key is set** (create `.env` file or set environment variable), then run:
 
 ```bash
 # Basic analysis
@@ -129,6 +156,9 @@ python agent.py --repo ./test_repo --query "How does DataProcessor use the foo f
 
 # Debugging scenario
 python agent.py --repo ./test_repo --query "Why might the batch processing fail?" --task debugging
+
+# Repository statistics
+python agent.py --repo ./test_repo --stats
 ```
 
 ### Sample Query Output
@@ -191,24 +221,37 @@ The generated prompt includes:
 
 ## Indexing Performance
 
-- First run: Indexes repository and saves to `.prompt_agent_index.*` files
-- Subsequent runs: Loads existing index (much faster)
-- Use `--rebuild` to force re-indexing after code changes
+- **First run**: Indexes repository and saves to `.prompt_agent_index.*` files
+- **Subsequent runs**: Loads existing index (much faster)
+- **After code changes**: Use `--rebuild` to force re-indexing
+- **Index files**: Created in the target repository directory for caching
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **"OPENAI_API_KEY not set"**: Set your OpenAI API key environment variable
+1. **"OPENAI_API_KEY not set"**: 
+   - **Recommended**: Create a `.env` file with your API key
+   - **Alternative**: Set environment variable using platform-specific syntax
+   - **Windows users**: Don't use `export` command (Unix/Linux only)
+
 2. **"Repository not indexed"**: Index gets corrupted - use `--rebuild`
+
 3. **Import errors**: Ensure all dependencies are installed with `pip install -r requirements.txt`
+
 4. **Empty results**: Try lowering `--similarity-threshold` (e.g., 0.2)
+
+5. **Windows PowerShell issues**: 
+   - Use `$env:VARIABLE="value"` syntax instead of `export`
+   - Or use the `.env` file approach to avoid platform issues
 
 ### Debug Tips
 
 - Use `--stats` to see repository indexing statistics
 - Check FAISS index files in repo: `.prompt_agent_index.index` and `.prompt_agent_index.metadata`
 - Test with the provided `test_repo` first to verify setup
+- Verify `.env` file exists and contains your API key: `cat .env` (Linux/macOS) or `Get-Content .env` (Windows)
+- The agent automatically loads `.env` files - no manual environment setup needed
 
 ## Limitations
 

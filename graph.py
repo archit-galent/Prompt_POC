@@ -58,6 +58,9 @@ class DependencyGraphBuilder:
         function_calls = defaultdict(set)
         current_scope = []
         
+        # Store discovered nodes for later creation
+        discovered_nodes = []
+        
         class AnalysisVisitor(ast.NodeVisitor):
             def visit_Import(self, node):
                 for alias in node.names:
@@ -77,14 +80,12 @@ class DependencyGraphBuilder:
                 func_name = node.name
                 exports.add(func_name)
                 
-                # Create node for this function
-                node_id = self._get_node_id(func_name, file_path)
-                self.nodes[node_id] = DependencyNode(
-                    name=func_name,
-                    node_type="function", 
-                    file_path=file_path,
-                    line_number=node.lineno
-                )
+                # Store node info for later creation
+                discovered_nodes.append({
+                    'name': func_name,
+                    'type': 'function',
+                    'line_number': node.lineno
+                })
                 
                 # Enter function scope
                 current_scope.append(func_name)
@@ -102,14 +103,12 @@ class DependencyGraphBuilder:
                 class_name = node.name
                 exports.add(class_name)
                 
-                # Create node for this class
-                node_id = self._get_node_id(class_name, file_path)
-                self.nodes[node_id] = DependencyNode(
-                    name=class_name,
-                    node_type="class",
-                    file_path=file_path,
-                    line_number=node.lineno
-                )
+                # Store node info for later creation
+                discovered_nodes.append({
+                    'name': class_name,
+                    'type': 'class',
+                    'line_number': node.lineno
+                })
                 
                 # Enter class scope
                 current_scope.append(class_name)
@@ -138,6 +137,16 @@ class DependencyGraphBuilder:
         
         visitor = AnalysisVisitor()
         visitor.visit(tree)
+        
+        # Create nodes after analysis is complete
+        for node_info in discovered_nodes:
+            node_id = self._get_node_id(node_info['name'], file_path)
+            self.nodes[node_id] = DependencyNode(
+                name=node_info['name'],
+                node_type=node_info['type'],
+                file_path=file_path,
+                line_number=node_info['line_number']
+            )
         
         return imports, exports, function_calls
     
